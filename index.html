@@ -104,9 +104,9 @@ a{color:inherit;text-decoration:none;}
 .reader-title-wrap{flex:1;text-align:center;padding:0 10px;}
 .reader-book-title{font-family:var(--fc);font-size:1rem;color:#fff;line-height:1.2;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;}
 .reader-page-info{font-family:var(--fb);font-size:.72rem;color:rgba(255,255,255,.7);margin-top:2px;}
-.reader-scroll{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;align-items:center;padding:20px 0 100px;}
+.reader-scroll{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;align-items:center;background:#111;}
 .reader-scroll::-webkit-scrollbar{display:none;}
-.pdf-page-wrap{position:relative;width:100%;max-width:480px;}
+.pdf-page-wrap{position:relative;width:100%;display:block;}
 .pdf-page-wrap canvas{display:block;width:100%;height:auto;}
 .textLayer{position:absolute;top:0;left:0;width:100%;height:100%;overflow:hidden;pointer-events:auto;}
 .textLayer span{color:transparent;position:absolute;white-space:pre;cursor:text;transform-origin:0% 0%;-webkit-user-select:text;user-select:text;line-height:1;}
@@ -866,58 +866,41 @@ async function renderPDFPage(num) {
   viewer.innerHTML='';
 
   const page=await _pdfDoc.getPage(num);
-  const displayW = viewer.clientWidth || window.innerWidth;
+  const displayW = window.innerWidth;
   const dpr = window.devicePixelRatio || 1;
   const baseVP = page.getViewport({scale:1});
+  const displayH = displayW * (baseVP.height / baseVP.width);
 
-  // Scale to fill screen width, then multiply by dpr for crisp rendering
-  const scale = (displayW / baseVP.width) * dpr;
-  const vp = page.getViewport({scale});
+  // Render at full device pixel resolution for sharp text
+  const renderScale = (displayW * dpr) / baseVP.width;
+  const renderVP = page.getViewport({scale: renderScale});
 
   const wrap = document.createElement('div');
   wrap.className = 'pdf-page-wrap';
-  const displayH = displayW * (baseVP.height / baseVP.width);
-  wrap.style.cssText = `position:relative;width:${displayW}px;height:${displayH}px;`;
+  wrap.style.cssText = `position:relative;width:${displayW}px;height:${displayH}px;flex-shrink:0;`;
 
-  // Canvas renders at full device resolution
   const canvas = document.createElement('canvas');
-  canvas.width = vp.width;
-  canvas.height = vp.height;
-  // But displays at CSS screen size
+  canvas.width = renderVP.width;
+  canvas.height = renderVP.height;
   canvas.style.cssText = `display:block;width:${displayW}px;height:${displayH}px;`;
 
   const ctx = canvas.getContext('2d');
-  await page.render({canvasContext:ctx, viewport:vp}).promise;
+  await page.render({canvasContext:ctx, viewport:renderVP}).promise;
 
-  // Text layer at CSS display size for correct touch/selection positions
+  // Text layer uses display scale (not device scale) so touch positions align
+  const displayVP = page.getViewport({scale: displayW / baseVP.width});
   const td = document.createElement('div');
   td.className = 'textLayer';
   td.style.cssText = `position:absolute;top:0;left:0;width:${displayW}px;height:${displayH}px;overflow:hidden;pointer-events:auto;`;
 
   const tc = await page.getTextContent();
-  // Use display scale (not dpr-multiplied) for text positioning
-  const displayVP = page.getViewport({scale: displayW / baseVP.width});
   tc.items.forEach(item => {
     if(!item.str || !item.str.trim()) return;
     const span = document.createElement('span');
     span.textContent = item.str;
     const tx = pdfjsLib.Util.transform(displayVP.transform, item.transform);
-    const x = tx[4];
-    const y = tx[5];
     const fontSize = Math.sqrt(tx[0]*tx[0] + tx[1]*tx[1]);
-    span.style.cssText = `
-      position:absolute;
-      left:${x}px;
-      top:${y - fontSize}px;
-      font-size:${fontSize}px;
-      color:transparent;
-      white-space:pre;
-      cursor:text;
-      transform-origin:0% 0%;
-      -webkit-user-select:text;
-      user-select:text;
-      line-height:1;
-    `;
+    span.style.cssText = `position:absolute;left:${tx[4]}px;top:${tx[5]-fontSize}px;font-size:${fontSize}px;color:transparent;white-space:pre;cursor:text;transform-origin:0% 0%;-webkit-user-select:text;user-select:text;line-height:1;`;
     td.appendChild(span);
   });
 
@@ -1231,4 +1214,3 @@ renderShelf();
 </script>
 </body>
 </html>
-  
