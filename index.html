@@ -604,8 +604,49 @@ const SL = {tbr:'To Be Read',reading:'Reading',finished:'Finished ✦'};
 //  STATE
 // ══════════════════════════════════════════════════
 let S = {books:[], filter:'all', curId:null};
+
+// ── IndexedDB for PDFs, localStorage for everything else ──
+let _db = null;
+function openDB() {
+  return new Promise((res,rej) => {
+    if(_db) return res(_db);
+    const req = indexedDB.open('tsundoku_db', 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore('pdfs', {keyPath:'id'});
+    req.onsuccess = e => { _db=e.target.result; res(_db); };
+    req.onerror = () => rej(req.error);
+  });
+}
+async function savePDF(bookId, dataURL) {
+  const db = await openDB();
+  return new Promise((res,rej) => {
+    const tx = db.transaction('pdfs','readwrite');
+    tx.objectStore('pdfs').put({id:bookId, data:dataURL});
+    tx.oncomplete = res; tx.onerror = rej;
+  });
+}
+async function getPDF(bookId) {
+  const db = await openDB();
+  return new Promise((res,rej) => {
+    const req = db.transaction('pdfs','readonly').objectStore('pdfs').get(bookId);
+    req.onsuccess = () => res(req.result ? req.result.data : null);
+    req.onerror = rej;
+  });
+}
+async function deletePDF(bookId) {
+  const db = await openDB();
+  return new Promise((res,rej) => {
+    const tx = db.transaction('pdfs','readwrite');
+    tx.objectStore('pdfs').delete(bookId);
+    tx.oncomplete = res; tx.onerror = rej;
+  });
+}
+
 const load = () => { try { const r=localStorage.getItem('tsundoku_v4'); if(r) S={...S,...JSON.parse(r)}; } catch(e){} };
-const save = () => localStorage.setItem('tsundoku_v4', JSON.stringify({books:S.books}));
+const save = () => {
+  // Save books WITHOUT pdfData (stored in IndexedDB instead)
+  const slim = S.books.map(b => { const {pdfData,...rest}=b; return rest; });
+  localStorage.setItem('tsundoku_v4', JSON.stringify({books:slim}));
+};
 const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 const cur = () => S.books.find(b=>b.id===S.curId)||null;
 const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -665,7 +706,7 @@ function tapBook(id) {
   S.curId = id;
   const b = cur();
   if(!b) return;
-  if(b.pdfData) {
+  if(b.hasPDF) {
     openReader(b);
   } else {
     document.getElementById('pdf-prompt-title').textContent = b.title;
@@ -716,7 +757,7 @@ function saveBook() {
   if(!title) { toast('A book needs a title.'); return; }
   const b={id:uid(),title,author:document.getElementById('in-author').value.trim()||'Unknown',
     rating:_addState.rating,status:_addState.status,grad:_addState.grad,coverDataURL:_addState.dataURL,
-    quotes:[],bookmarks:[],theme:{},pdfData:null,journal:'',pdfPage:1,dateAdded:Date.now()};
+    quotes:[],bookmarks:[],theme:{},hasPDF:false,journal:'',pdfPage:1,dateAdded:Date.now()};
   S.books.unshift(b); save(); closeOv('ov-add'); renderShelf(); toast('Added to your shelf ✦');
 }
 
@@ -734,8 +775,9 @@ function handlePDFUpload(inp) {
   if(!inp.files[0]) return;
   const b=cur(); if(!b) return;
   const reader=new FileReader();
-  reader.onload=function(e) {
-    b.pdfData=e.target.result; save();
+  reader.onload=async function(e) {
+    await savePDF(b.id, e.target.result);
+    b.hasPDF=true; save();
     closeOv('ov-pdf');
     openReader(b);
     toast('PDF loaded ✦');
@@ -743,18 +785,25 @@ function handlePDFUpload(inp) {
   reader.readAsDataURL(inp.files[0]);
 }
 
-function openReader(b) {
+async function openReader(b) {
   S.curId=b.id;
   document.getElementById('reader-title').textContent=b.title;
   navTo('reader');
   document.getElementById('reader-loading').style.display='block';
+  document.getElementById('reader-loading').textContent='Loading your book…';
   document.getElementById('pdf-viewer').innerHTML='';
   _pdfPage=b.pdfPage||1;
   if(_pdfLoadedId===b.id && _pdfDoc) {
     document.getElementById('reader-loading').style.display='none';
     renderPDFPage(_pdfPage);
   } else {
-    loadPDF(b.pdfData, b.id);
+    const data = await getPDF(b.id);
+    if(data) {
+      loadPDF(data, b.id);
+    } else {
+      document.getElementById('reader-loading').textContent='PDF not found. Please upload it again.';
+      b.hasPDF=false; save();
+    }
   }
   attachSelectionListener();
   setupBarHide();
@@ -997,6 +1046,7 @@ function saveBookInfo() {
 function confirmRemoveBook() {
   if(!confirm('Remove this book from your shelf?')) return;
   const id=S.curId;
+  deletePDF(id);
   S.books=S.books.filter(x=>x.id!==id);
   save(); closeOv('ov-info'); navTo('shelf'); toast('Book removed.');
 }
