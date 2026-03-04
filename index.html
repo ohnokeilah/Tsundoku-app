@@ -864,42 +864,48 @@ async function renderPDFPage(num) {
   const b=cur(); if(b) { b.pdfPage=num; save(); }
   const viewer=document.getElementById('pdf-viewer');
   viewer.innerHTML='';
+
   const page=await _pdfDoc.getPage(num);
-  const W=viewer.clientWidth||window.innerWidth;
-  const baseVP=page.getViewport({scale:1});
-  const scale=W/baseVP.width;
-  const vp=page.getViewport({scale});
+  const displayW = viewer.clientWidth || window.innerWidth;
+  const dpr = window.devicePixelRatio || 1;
+  const baseVP = page.getViewport({scale:1});
 
-  const wrap=document.createElement('div');
-  wrap.className='pdf-page-wrap';
-  wrap.style.cssText=`position:relative;width:${W}px;`;
+  // Scale to fill screen width, then multiply by dpr for crisp rendering
+  const scale = (displayW / baseVP.width) * dpr;
+  const vp = page.getViewport({scale});
 
-  const canvas=document.createElement('canvas');
-  canvas.width=vp.width;
-  canvas.height=vp.height;
-  canvas.style.cssText=`display:block;width:${W}px;height:auto;`;
-  await page.render({canvasContext:canvas.getContext('2d'),viewport:vp}).promise;
+  const wrap = document.createElement('div');
+  wrap.className = 'pdf-page-wrap';
+  const displayH = displayW * (baseVP.height / baseVP.width);
+  wrap.style.cssText = `position:relative;width:${displayW}px;height:${displayH}px;`;
 
-  // Text layer — must match visual rendered size exactly
-  const visH = W * (vp.height / vp.width);
-  const td=document.createElement('div');
-  td.className='textLayer';
-  td.style.cssText=`position:absolute;top:0;left:0;width:${W}px;height:${visH}px;overflow:hidden;pointer-events:auto;`;
+  // Canvas renders at full device resolution
+  const canvas = document.createElement('canvas');
+  canvas.width = vp.width;
+  canvas.height = vp.height;
+  // But displays at CSS screen size
+  canvas.style.cssText = `display:block;width:${displayW}px;height:${displayH}px;`;
 
-  // Scale text spans from PDF coords to screen coords
-  const scaleX = W / baseVP.width;
-  const scaleY = visH / baseVP.height;
+  const ctx = canvas.getContext('2d');
+  await page.render({canvasContext:ctx, viewport:vp}).promise;
 
-  const tc=await page.getTextContent();
+  // Text layer at CSS display size for correct touch/selection positions
+  const td = document.createElement('div');
+  td.className = 'textLayer';
+  td.style.cssText = `position:absolute;top:0;left:0;width:${displayW}px;height:${displayH}px;overflow:hidden;pointer-events:auto;`;
+
+  const tc = await page.getTextContent();
+  // Use display scale (not dpr-multiplied) for text positioning
+  const displayVP = page.getViewport({scale: displayW / baseVP.width});
   tc.items.forEach(item => {
-    if(!item.str) return;
-    const span=document.createElement('span');
-    span.textContent=item.str;
-    const tx=pdfjsLib.Util.transform(vp.transform, item.transform);
-    const x=tx[4];
-    const y=tx[5];
-    const fontSize=Math.sqrt(tx[0]*tx[0]+tx[1]*tx[1]);
-    span.style.cssText=`
+    if(!item.str || !item.str.trim()) return;
+    const span = document.createElement('span');
+    span.textContent = item.str;
+    const tx = pdfjsLib.Util.transform(displayVP.transform, item.transform);
+    const x = tx[4];
+    const y = tx[5];
+    const fontSize = Math.sqrt(tx[0]*tx[0] + tx[1]*tx[1]);
+    span.style.cssText = `
       position:absolute;
       left:${x}px;
       top:${y - fontSize}px;
@@ -910,6 +916,7 @@ async function renderPDFPage(num) {
       transform-origin:0% 0%;
       -webkit-user-select:text;
       user-select:text;
+      line-height:1;
     `;
     td.appendChild(span);
   });
@@ -917,8 +924,8 @@ async function renderPDFPage(num) {
   wrap.appendChild(canvas);
   wrap.appendChild(td);
   viewer.appendChild(wrap);
-  document.getElementById('reader-page-info').textContent=num+' / '+_pdfTotal;
-  document.getElementById('reader-scroll').scrollTop=0;
+  document.getElementById('reader-page-info').textContent = num + ' / ' + _pdfTotal;
+  document.getElementById('reader-scroll').scrollTop = 0;
 }
 
 async function pdfPrev() { if(_pdfPage>1){await renderPDFPage(_pdfPage-1); hideQuoteBubble();} }
@@ -1224,3 +1231,4 @@ renderShelf();
 </script>
 </body>
 </html>
+  
