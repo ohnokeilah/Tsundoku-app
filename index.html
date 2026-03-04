@@ -616,11 +616,11 @@ function openDB() {
     req.onerror = () => rej(req.error);
   });
 }
-async function savePDF(bookId, dataURL) {
+async function savePDF(bookId, arrayBuffer) {
   const db = await openDB();
   return new Promise((res,rej) => {
     const tx = db.transaction('pdfs','readwrite');
-    tx.objectStore('pdfs').put({id:bookId, data:dataURL});
+    tx.objectStore('pdfs').put({id:bookId, data:arrayBuffer});
     tx.oncomplete = res; tx.onerror = rej;
   });
 }
@@ -774,15 +774,25 @@ if(typeof pdfjsLib!=='undefined') {
 function handlePDFUpload(inp) {
   if(!inp.files[0]) return;
   const b=cur(); if(!b) return;
+  const file = inp.files[0];
+  // Warn if file is very large
+  if(file.size > 50 * 1024 * 1024) {
+    toast('File too large. Try a PDF under 50MB.'); return;
+  }
   const reader=new FileReader();
   reader.onload=async function(e) {
-    await savePDF(b.id, e.target.result);
-    b.hasPDF=true; save();
-    closeOv('ov-pdf');
-    openReader(b);
-    toast('PDF loaded ✦');
+    try {
+      await savePDF(b.id, e.target.result);
+      b.hasPDF=true; save();
+      closeOv('ov-pdf');
+      openReader(b);
+      toast('PDF loaded ✦');
+    } catch(err) {
+      console.error(err);
+      toast('Storage full. Try a smaller PDF.');
+    }
   };
-  reader.readAsDataURL(inp.files[0]);
+  reader.readAsArrayBuffer(file);
 }
 
 async function openReader(b) {
@@ -815,14 +825,10 @@ function leaveReader() {
   navTo('shelf');
 }
 
-async function loadPDF(dataURL, bookId) {
+async function loadPDF(arrayBuffer, bookId) {
   if(typeof pdfjsLib==='undefined') { toast('PDF reader loading, try again.'); return; }
   try {
-    const b64=dataURL.split(',')[1];
-    const bin=atob(b64);
-    const arr=new Uint8Array(bin.length);
-    for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
-    _pdfDoc=await pdfjsLib.getDocument({data:arr}).promise;
+    _pdfDoc=await pdfjsLib.getDocument({data:arrayBuffer}).promise;
     _pdfTotal=_pdfDoc.numPages;
     _pdfLoadedId=bookId;
     document.getElementById('reader-loading').style.display='none';
