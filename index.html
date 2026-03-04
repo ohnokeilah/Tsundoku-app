@@ -618,9 +618,10 @@ function openDB() {
 }
 async function savePDF(bookId, arrayBuffer) {
   const db = await openDB();
+  const data = new Uint8Array(arrayBuffer);
   return new Promise((res,rej) => {
     const tx = db.transaction('pdfs','readwrite');
-    tx.objectStore('pdfs').put({id:bookId, data:arrayBuffer});
+    tx.objectStore('pdfs').put({id:bookId, data:data});
     tx.oncomplete = res; tx.onerror = rej;
   });
 }
@@ -628,7 +629,22 @@ async function getPDF(bookId) {
   const db = await openDB();
   return new Promise((res,rej) => {
     const req = db.transaction('pdfs','readonly').objectStore('pdfs').get(bookId);
-    req.onsuccess = () => res(req.result ? req.result.data : null);
+    req.onsuccess = () => {
+      if(!req.result) return res(null);
+      const d = req.result.data;
+      // Ensure we always return a Uint8Array
+      if(d instanceof Uint8Array) return res(d);
+      if(d instanceof ArrayBuffer) return res(new Uint8Array(d));
+      // Legacy base64 dataURL fallback
+      if(typeof d === 'string' && d.startsWith('data:')) {
+        const b64 = d.split(',')[1];
+        const bin = atob(b64);
+        const arr = new Uint8Array(bin.length);
+        for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+        return res(arr);
+      }
+      res(null);
+    };
     req.onerror = rej;
   });
 }
@@ -828,7 +844,9 @@ function leaveReader() {
 async function loadPDF(arrayBuffer, bookId) {
   if(typeof pdfjsLib==='undefined') { toast('PDF reader loading, try again.'); return; }
   try {
-    _pdfDoc=await pdfjsLib.getDocument({data:arrayBuffer}).promise;
+    // PDF.js needs Uint8Array not raw ArrayBuffer
+    const data = arrayBuffer instanceof Uint8Array ? arrayBuffer : new Uint8Array(arrayBuffer);
+    _pdfDoc=await pdfjsLib.getDocument({data:data}).promise;
     _pdfTotal=_pdfDoc.numPages;
     _pdfLoadedId=bookId;
     document.getElementById('reader-loading').style.display='none';
@@ -847,22 +865,57 @@ async function renderPDFPage(num) {
   const viewer=document.getElementById('pdf-viewer');
   viewer.innerHTML='';
   const page=await _pdfDoc.getPage(num);
-  const W=window.innerWidth;
-  const scale=W/page.getViewport({scale:1}).width;
+  const W=viewer.clientWidth||window.innerWidth;
+  const baseVP=page.getViewport({scale:1});
+  const scale=W/baseVP.width;
   const vp=page.getViewport({scale});
+
   const wrap=document.createElement('div');
   wrap.className='pdf-page-wrap';
+  wrap.style.cssText=`position:relative;width:${W}px;`;
+
   const canvas=document.createElement('canvas');
-  canvas.width=vp.width; canvas.height=vp.height;
-  canvas.style.width='100%'; canvas.style.height='auto';
+  canvas.width=vp.width;
+  canvas.height=vp.height;
+  canvas.style.cssText=`display:block;width:${W}px;height:auto;`;
   await page.render({canvasContext:canvas.getContext('2d'),viewport:vp}).promise;
+
+  // Text layer — must match visual rendered size exactly
+  const visH = W * (vp.height / vp.width);
   const td=document.createElement('div');
   td.className='textLayer';
-  td.style.cssText=`position:absolute;top:0;left:0;width:${vp.width}px;height:${vp.height}px;`;
+  td.style.cssText=`position:absolute;top:0;left:0;width:${W}px;height:${visH}px;overflow:hidden;pointer-events:auto;`;
+
+  // Scale text spans from PDF coords to screen coords
+  const scaleX = W / baseVP.width;
+  const scaleY = visH / baseVP.height;
+
   const tc=await page.getTextContent();
-  const task=pdfjsLib.renderTextLayer({textContentSource:tc,container:td,viewport:vp,textDivs:[]});
-  if(task&&task.promise){try{await task.promise;}catch(e){}}
-  wrap.appendChild(canvas); wrap.appendChild(td);
+  tc.items.forEach(item => {
+    if(!item.str) return;
+    const span=document.createElement('span');
+    span.textContent=item.str;
+    const tx=pdfjsLib.Util.transform(vp.transform, item.transform);
+    const x=tx[4];
+    const y=tx[5];
+    const fontSize=Math.sqrt(tx[0]*tx[0]+tx[1]*tx[1]);
+    span.style.cssText=`
+      position:absolute;
+      left:${x}px;
+      top:${y - fontSize}px;
+      font-size:${fontSize}px;
+      color:transparent;
+      white-space:pre;
+      cursor:text;
+      transform-origin:0% 0%;
+      -webkit-user-select:text;
+      user-select:text;
+    `;
+    td.appendChild(span);
+  });
+
+  wrap.appendChild(canvas);
+  wrap.appendChild(td);
   viewer.appendChild(wrap);
   document.getElementById('reader-page-info').textContent=num+' / '+_pdfTotal;
   document.getElementById('reader-scroll').scrollTop=0;
