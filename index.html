@@ -956,7 +956,8 @@ function hideQuoteBubble() {
   _hlText='';
 }
 function saveHighlight() {
-  const text=_hlText; if(!text) return;
+  const raw=_hlText; if(!raw) return;
+const text=raw.replace(/\n/g,' ').replace(/\s+/g,' ').trim();
   const b=cur(); if(!b) return;
   b.quotes.unshift({id:uid(),text,page:String(_hlPage),date:Date.now()});
   save(); renderPanelQuotes(b);
