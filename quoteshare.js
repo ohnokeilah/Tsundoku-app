@@ -21,7 +21,6 @@ const QuoteShare = (() => {
 
   /* ── TORN EDGE GENERATOR ─────────────────────────────────────── */
   function tornEdgePath(ctx, y, width, amplitude, peaks, flipped) {
-    /* Builds a closed torn-paper shape across the top or bottom */
     const step  = width / peaks;
     const pts   = [];
 
@@ -125,16 +124,13 @@ const QuoteShare = (() => {
     canvas.height   = H;
     const ctx       = canvas.getContext('2d');
 
-    /* Seed the torn edges with a consistent-ish shape */
     const TEAR_H    = 90;
     const TOP_Y     = TEAR_H;
     const BOTTOM_Y  = H - TEAR_H;
 
-    /* ── 1. Background fill ─────────────────────────────────── */
     ctx.fillStyle = PAPER_BG;
     ctx.fillRect(0, 0, W, H);
 
-    /* ── 2. Subtle warm gradient overlay ───────────────────── */
     const grad = ctx.createRadialGradient(W * 0.5, H * 0.4, 0, W * 0.5, H * 0.4, W * 0.8);
     grad.addColorStop(0,   'rgba(255,255,255,0.0)');
     grad.addColorStop(0.6, 'rgba(201,112,128,0.04)');
@@ -142,20 +138,15 @@ const QuoteShare = (() => {
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
 
-    /* ── 3. Faint horizontal page lines ────────────────────── */
     addPageLines(ctx, W, H, TOP_Y, BOTTOM_Y);
-
-    /* ── 4. Grain texture ───────────────────────────────────── */
     addGrain(ctx, W, H);
 
-    /* ── 5. Top torn edge shadow ────────────────────────────── */
     ctx.save();
     tornEdgePath(ctx, TOP_Y, W, 28, 22, false);
     ctx.fillStyle = TEAR_SHADOW;
     ctx.fill();
     ctx.restore();
 
-    /* ── 6. Top torn edge (paper coloured, covers the shadow) ── */
     ctx.save();
     tornEdgePath(ctx, TOP_Y - 6, W, 24, 22, false);
     ctx.fillStyle = PAPER_DARK;
@@ -168,14 +159,12 @@ const QuoteShare = (() => {
     ctx.fill();
     ctx.restore();
 
-    /* ── 7. Bottom torn edge shadow ─────────────────────────── */
     ctx.save();
     tornEdgePath(ctx, BOTTOM_Y, W, 28, 22, true);
     ctx.fillStyle = TEAR_SHADOW;
     ctx.fill();
     ctx.restore();
 
-    /* ── 8. Bottom torn edge ────────────────────────────────── */
     ctx.save();
     tornEdgePath(ctx, BOTTOM_Y + 6, W, 24, 22, true);
     ctx.fillStyle = PAPER_DARK;
@@ -188,15 +177,12 @@ const QuoteShare = (() => {
     ctx.fill();
     ctx.restore();
 
-    /* ── 9. Opening quotation mark ──────────────────────────── */
     drawQuoteMark(ctx, 54, TOP_Y + 20, 180, 0.13);
 
-    /* ── 10. Quote text ─────────────────────────────────────── */
     const PAD        = 88;
     const TEXT_W     = W - PAD * 2;
     const CENTER_Y   = (TOP_Y + BOTTOM_Y) / 2;
 
-    /* Determine font size based on quote length */
     let fontSize = 52;
     if (text.length > 180) fontSize = 38;
     else if (text.length > 100) fontSize = 44;
@@ -212,14 +198,12 @@ const QuoteShare = (() => {
     const blockH = lines.length * lineH;
     let   startY = CENTER_Y - blockH / 2 + lineH / 2;
 
-    /* Nudge up slightly if there's attribution below */
     if (bookTitle) startY -= 36;
 
     lines.forEach((ln, i) => {
       ctx.fillText(ln, PAD, startY + i * lineH);
     });
 
-    /* ── 11. Closing quotation mark ─────────────────────────── */
     const lastLineY  = startY + (lines.length - 1) * lineH;
     const lastLineW  = ctx.measureText(lines[lines.length - 1]).width;
     ctx.save();
@@ -229,7 +213,6 @@ const QuoteShare = (() => {
     ctx.fillText('\u201D', PAD + lastLineW + 6, lastLineY);
     ctx.restore();
 
-    /* ── 12. Thin accent rule ───────────────────────────────── */
     const ruleY = startY + lines.length * lineH + 28;
     ctx.save();
     const ruleGrad = ctx.createLinearGradient(PAD, 0, PAD + 120, 0);
@@ -243,7 +226,6 @@ const QuoteShare = (() => {
     ctx.stroke();
     ctx.restore();
 
-    /* ── 13. Attribution ────────────────────────────────────── */
     if (bookTitle) {
       ctx.save();
       ctx.font         = `500 28px 'Dancing Script', cursive`;
@@ -256,7 +238,6 @@ const QuoteShare = (() => {
       ctx.restore();
     }
 
-    /* ── 14. Small Tsundoku watermark ───────────────────────── */
     ctx.save();
     ctx.font         = `italic 22px 'Cormorant Garamond', serif`;
     ctx.fillStyle    = `rgba(107,39,55,0.25)`;
@@ -337,7 +318,6 @@ const QuoteShare = (() => {
         font-family: var(--fb, 'Cormorant Garamond', serif);
         font-size: .9rem; flex: none; padding: 13px 16px;
       }
-      /* Share button on quote cards */
       .qs-card-btn {
         font-size: .72rem; color: var(--t3, #9A7080);
         cursor: pointer; background: none; border: none;
@@ -367,9 +347,7 @@ const QuoteShare = (() => {
     el.addEventListener('click', e => {
       if (e.target === el) closePreview();
     });
-    document.getElementById('qs-close-btn', el)?.addEventListener('click', closePreview);
     document.body.appendChild(el);
-
     document.getElementById('qs-close-btn').addEventListener('click', closePreview);
   }
 
@@ -432,8 +410,8 @@ const QuoteShare = (() => {
     if (card.dataset.qsAttached) return;
     card.dataset.qsAttached = '1';
 
-    const textEl  = card.querySelector('.qcard-text');
-    const metaEl  = card.querySelector('.qcard-meta');
+    const textEl  = card.querySelector('.qcard-text, .gq-text');
+    const metaEl  = card.querySelector('.qcard-meta, .gq-src');
     if (!textEl) return;
 
     const text      = textEl.textContent.trim();
@@ -450,23 +428,25 @@ const QuoteShare = (() => {
       share({ text, bookTitle, page });
     });
 
-    const delBtn = card.querySelector('.del-btn');
+    const delBtn = card.querySelector('.del-btn, .gq-del');
     if (delBtn) delBtn.insertAdjacentElement('beforebegin', btn);
     else card.appendChild(btn);
   }
 
   function scanAndAttach() {
-    document.querySelectorAll('.qcard').forEach(attachToCard);
+    document.querySelectorAll('.qcard, .gq-item').forEach(attachToCard);
   }
 
-  /* ── MUTATION OBSERVER (catches dynamically rendered cards) ───── */
+  /* ── MUTATION OBSERVER ───────────────────────────────────────── */
   function observeDOM() {
     const observer = new MutationObserver(mutations => {
       for (const m of mutations) {
         m.addedNodes.forEach(node => {
           if (!node.querySelectorAll) return;
-          node.querySelectorAll('.qcard').forEach(attachToCard);
-          if (node.classList && node.classList.contains('qcard')) attachToCard(node);
+          node.querySelectorAll('.qcard, .gq-item').forEach(attachToCard);
+          if (node.classList && (node.classList.contains('qcard') || node.classList.contains('gq-item'))) {
+            attachToCard(node);
+          }
         });
       }
     });
